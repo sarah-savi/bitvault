@@ -257,3 +257,61 @@
     )
   )
 )
+
+;; Burns stablecoin to reduce collateral obligations
+(define-public (burn-stablecoin (amount uint))
+  (let (
+      (vault (unwrap! (map-get? collateral-vaults tx-sender) ERR-NOT-INITIALIZED))
+      (current-stable-balance (default-to u0 (map-get? stablecoin-balances tx-sender)))
+    )
+    (begin
+      (asserts! (>= current-stable-balance amount) ERR-INSUFFICIENT-BALANCE)
+      (map-set collateral-vaults tx-sender {
+        btc-locked: (get btc-locked vault),
+        stablecoin-minted: (- (get stablecoin-minted vault) amount),
+        last-update-height: stacks-block-height,
+      })
+      (map-set stablecoin-balances tx-sender (- current-stable-balance amount))
+      (var-set total-supply (- (var-get total-supply) amount))
+      (ok true)
+    )
+  )
+)
+
+;; LIQUIDITY POOL OPERATIONS
+
+;; Adds liquidity to AMM pool for yield generation
+(define-public (add-liquidity
+    (btc-amount uint)
+    (stable-amount uint)
+  )
+  (let (
+      (pool-btc (var-get pool-btc-balance))
+      (pool-stable (var-get pool-stable-balance))
+      (lp-tokens (calculate-lp-tokens btc-amount stable-amount))
+      (provider-data (default-to {
+        pool-tokens: u0,
+        btc-provided: u0,
+        stable-provided: u0,
+      }
+        (map-get? liquidity-providers tx-sender)
+      ))
+    )
+    (begin
+      (asserts! (> btc-amount u0) ERR-INVALID-AMOUNT)
+      (asserts! (> stable-amount u0) ERR-INVALID-AMOUNT)
+      (try! (transfer-balance btc-amount tx-sender (as-contract tx-sender)))
+      (try! (transfer-balance stable-amount tx-sender (as-contract tx-sender)))
+      ;; Update pool reserves
+      (var-set pool-btc-balance (+ pool-btc btc-amount))
+      (var-set pool-stable-balance (+ pool-stable stable-amount))
+      ;; Update provider position
+      (map-set liquidity-providers tx-sender {
+        pool-tokens: (+ (get pool-tokens provider-data) lp-tokens),
+        btc-provided: (+ (get btc-provided provider-data) btc-amount),
+        stable-provided: (+ (get stable-provided provider-data) stable-amount),
+      })
+      (ok lp-tokens)
+    )
+  )
+)
