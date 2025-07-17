@@ -80,3 +80,89 @@
     stable-provided: uint,
   }
 )
+
+;; PRIVATE UTILITY FUNCTIONS
+
+;; Validates price input against safety bounds
+(define-private (validate-price (price uint))
+  (and
+    (> price u0)
+    (<= price MAX-PRICE)
+  )
+)
+
+;; Executes secure balance transfer between accounts
+(define-private (transfer-balance
+    (amount uint)
+    (sender principal)
+    (recipient principal)
+  )
+  (let (
+      (sender-balance (default-to u0 (map-get? balances sender)))
+      (recipient-balance (default-to u0 (map-get? balances recipient)))
+    )
+    (if (>= sender-balance amount)
+      (begin
+        (map-set balances sender (- sender-balance amount))
+        (map-set balances recipient (+ recipient-balance amount))
+        (ok true)
+      )
+      ERR-INSUFFICIENT-BALANCE
+    )
+  )
+)
+
+;; Calculates real-time collateral ratio for risk assessment
+(define-private (calculate-collateral-ratio
+    (btc-amount uint)
+    (stablecoin-amount uint)
+  )
+  (if (is-eq stablecoin-amount u0)
+    PRECISION
+    (let (
+        (btc-value-usd (* btc-amount (var-get oracle-price)))
+        (collateral-ratio (/ (* btc-value-usd u100) stablecoin-amount))
+      )
+      collateral-ratio
+    )
+  )
+)
+
+;; Validates collateral meets minimum safety requirements
+(define-private (check-collateral-requirement
+    (btc-locked uint)
+    (stablecoin-amount uint)
+  )
+  (let ((ratio (calculate-collateral-ratio btc-locked stablecoin-amount)))
+    (if (>= ratio MINIMUM-COLLATERAL-RATIO)
+      (ok true)
+      ERR-INSUFFICIENT-COLLATERAL
+    )
+  )
+)
+
+;; Computes liquidity provider tokens for AMM participation
+(define-private (calculate-lp-tokens
+    (btc-amount uint)
+    (stable-amount uint)
+  )
+  (let (
+      (pool-btc (var-get pool-btc-balance))
+      (pool-stable (var-get pool-stable-balance))
+    )
+    (if (is-eq pool-btc u0)
+      (sqrt (* btc-amount stable-amount))
+      (/ (* btc-amount (sqrt (* pool-btc pool-stable))) pool-btc)
+    )
+  )
+)
+
+;; Efficient integer square root implementation
+(define-private (sqrt (x uint))
+  (let ((next (+ (/ x u2) u1)))
+    (if (<= x u2)
+      u1
+      next
+    )
+  )
+)
